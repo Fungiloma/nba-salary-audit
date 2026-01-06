@@ -1,4 +1,4 @@
-# NBA Salary Audit V19: The Sniper Factor 🏀📊
+# NBA Salary Audit: Analysis of performance vs Salary 🏀📊
 
 This project provides a comprehensive data-driven audit of NBA salaries. By crossing real-time statistics from the `nba_api` with current contract data, it calculates a custom **Value Score** to categorize players into five distinct financial tiers.
 
