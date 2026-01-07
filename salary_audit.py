@@ -6,17 +6,17 @@ import re
 import difflib
 import unicodedata
 
-# --- CONFIGURACIÓN ---
+# --- Configuration ---
 SEASON_ID = '2025-26'
 MIN_GAMES = 16
 LEAGUE_AVG_TS = 0.58
-LEAGUE_AVG_3P = 0.36  # 36% media liga
+LEAGUE_AVG_3P = 0.36  # 36% league avg
 
-# --- FILTROS DE MINUTOS ---
+# --- Minutes filter ---
 MIN_MINUTES_ELITE = 28.0
 MIN_MINUTES_ROTATION = 20.0
 
-# --- DICCIONARIO MANUAL ---
+# --- Manual Dictionary ---
 NICKNAME_MAP = {
     "Jimmy Butler": "Jimmy Butler III",
     "Jayson Tatum": "Jayson Tatum",
@@ -42,9 +42,9 @@ NICKNAME_MAP = {
     "Xavier Tillman Sr.": "Xavier Tillman"
 }
 
-# --- 1. EXTRACCIÓN ---
-def get_raw_salaries(csv_path='/content/salarios_nba.csv'): # Corregido path relativo
-    print(f"1. Cargando salarios...")
+# --- 1. Extraction ---
+def get_raw_salaries(csv_path='/content/salarios_nba.csv'):
+    print(f"1. Loading salaries...")
     try:
         with open(csv_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
@@ -79,21 +79,19 @@ def get_raw_salaries(csv_path='/content/salarios_nba.csv'): # Corregido path rel
         return pd.DataFrame()
 
 def get_all_player_stats():
-    # CAMBIO CRÍTICO: Descargamos dos sets de datos y los unimos
-    print(f"2. API NBA: Obteniendo stats Avanzadas y Base...")
+    print(f"2. API NBA: Getting stats...")
     try:
-        # 1. Stats Avanzadas (PIE, TS%, USG%)
+        # 1. Advanced stats (PIE, TS%, USG%)
         advanced = leaguedashplayerstats.LeagueDashPlayerStats(
             season=SEASON_ID, measure_type_detailed_defense='Advanced'
         ).get_data_frames()[0]
 
-        # 2. Stats Base (Para tener FG3A, FG3_PCT, GP, MIN exactos)
+        # 2. Base Stats (FG3A, FG3_PCT, GP, MIN)
         base = leaguedashplayerstats.LeagueDashPlayerStats(
             season=SEASON_ID, measure_type_detailed_defense='Base'
         ).get_data_frames()[0]
 
-        # 3. Unimos ambas tablas por PLAYER_ID
-        # Nos quedamos con todo de Advanced y añadimos las columas de tiro de Base
+        # 3. Merge both tables using PLAYER_ID
         cols_to_use = base[['PLAYER_ID', 'FG3M', 'FG3A', 'FG3_PCT']]
         df_merged = pd.merge(advanced, cols_to_use, on='PLAYER_ID', how='left')
 
@@ -108,9 +106,9 @@ def get_team_stats():
         return stats.get_data_frames()[0][['TEAM_ID', 'TEAM_NAME', 'NET_RATING']]
     except: return pd.DataFrame()
 
-# --- REPARACIÓN DE NOMBRES ---
+# --- Fix names with special characters ---
 def fix_broken_names(df_csv, df_api):
-    print("\n🔧 REPARANDO NOMBRES...")
+    print("\n🔧 Repairing names...")
     api_names = df_api['PLAYER_NAME'].unique().tolist()
 
     def find_match(dirty_name):
@@ -131,7 +129,7 @@ def fix_broken_names(df_csv, df_api):
     df_csv['MATCHED_NAME'] = df_csv['Player'].apply(find_match)
     return df_csv
 
-# --- VISUALIZACIÓN ---
+# --- Visualisation ---
 def format_euro_currency(val): return "{:,.0f}".format(val).replace(",", ".") if pd.notna(val) else "-"
 def format_pct(val): return "{:.1f}%".format(val * 100).replace(".", ",") if pd.notna(val) else "-"
 def format_dec(val): return "{:.1f}".format(val).replace(".", ",") if pd.notna(val) else "-"
@@ -139,14 +137,14 @@ def format_score(val): return "{:.1f}".format(val).replace(".", ",") if pd.notna
 
 def finalize_and_print(df, title):
     if df.empty:
-        print(f"\n--- {title} ---\n(Ningún jugador cumple criterios)")
+        print(f"\n--- {title} ---\n(Any player matches the criteria)")
         return
     df_show = df.copy()
     if 'PLAYER_NAME' in df_show.columns:
         df_show['Player'] = df_show['PLAYER_NAME']
     df_show['Salary_Formatted'] = df_show['Salary'].apply(format_euro_currency)
 
-    # Añadimos columna de 3P% para ver el efecto
+    # Add 3P% column
     if 'FG3_PCT' in df_show.columns:
         df_show['3P%'] = df_show['FG3_PCT'].apply(format_pct)
         cols = ['Player', 'Salary_Formatted', 'USG_PCT', 'TS_PCT', '3P%', 'PIE', 'REL_NET_RATING', 'SCORE']
@@ -161,10 +159,10 @@ def finalize_and_print(df, title):
     print(f"\n--- {title} ---")
     print(df_show[cols].reset_index(drop=True).to_string(index=False))
 
-# --- MAIN ---
+# --- Main ---
 def main():
     df_salaries = get_raw_salaries()
-    df_players = get_all_player_stats() # Usamos la nueva función combinada
+    df_players = get_all_player_stats()
     df_teams = get_team_stats()
 
     if df_salaries.empty or df_players.empty: return None, None, None, None, None, None
@@ -177,16 +175,13 @@ def main():
 
     df_final['REL_NET_RATING'] = df_final['NET_RATING'] - df_final['TEAM_NET_RATING']
 
-    # --- FILTRO GLOBAL ---
+    # --- Global filter ---
     df_final = df_final[df_final['GP'] >= MIN_GAMES]
 
-    # --- NUEVO CÁLCULO DE SCORE CON FACTOR TIRADOR ---
-    # 1. Calculamos intentos de triple por partido
-    # FG3A viene del endpoint 'Base', GP también.
+    # 1. Calculate attempted 3P per game
     df_final['FG3A_PG'] = df_final['FG3A'] / df_final['GP']
 
-    # 2. Fórmula Maestra Actualizada
-    # SCORE = (PIE*100) + RelNet + (Eficiencia TS) + (Uso) + (Bonus Tirador)
+    # 2. Updated formula
     df_final['SCORE'] = (
         (df_final['PIE'] * 100) +
         df_final['REL_NET_RATING'] +
@@ -195,16 +190,14 @@ def main():
         ((df_final['FG3_PCT'] - LEAGUE_AVG_3P) * df_final['FG3A_PG'] * 15) # Factor Francotirador
     )
 
-    # --- LÓGICA DE SELECCIÓN ---
-
-    # 1. LISTA NEGRA
+    # 1. Toxic contracts
     df_blacklist = df_final[
         (df_final['Salary'] > 20000000) &
         (df_final['USG_PCT'] > 0.23) &
         (df_final['MIN'] >= MIN_MINUTES_ROTATION)
     ].sort_values('SCORE', ascending=True).head(5)
 
-    # 2. ESTRELLAS DE PAPEL
+    # 2. Fading stars
     excluded_blacklist = df_blacklist['Player'].tolist()
 
     df_paper_stars = df_final[
@@ -214,7 +207,7 @@ def main():
         (~df_final['Player'].isin(excluded_blacklist))
     ].sort_values('SCORE', ascending=True).head(5)
 
-    # 3. ALBATROS
+    # 3. Silent killers
     excluded_all_bad = pd.concat([df_blacklist['Player'], df_paper_stars['Player']])
 
     df_albatross = df_final[
@@ -225,13 +218,13 @@ def main():
         (~df_final['Player'].isin(excluded_all_bad))
     ].sort_values('SCORE', ascending=True).head(5)
 
-    # 4. ELITE
+    # 4. Elite
     df_elite = df_final[
         (df_final['Salary'] > 30000000) &
         (df_final['MIN'] >= MIN_MINUTES_ELITE)
     ].sort_values('SCORE', ascending=False).head(5)
 
-    # 5. CHOLLOS
+    # 5. Bargains
     df_bargains = df_final[
         (df_final['Salary'] < 15000000) &
         (df_final['REL_NET_RATING'] > 2.0) &
@@ -239,14 +232,14 @@ def main():
     ].sort_values('SCORE', ascending=False).head(10)
 
     print("\n" + "="*60)
-    print(f"      AUDITORÍA SALARIAL V19 - CON FACTOR TIRADOR")
+    print(f"      Salary audit")
     print("="*60)
 
-    finalize_and_print(df_blacklist, "TABLA 1: LA LISTA NEGRA (Tóxicos de Alto Uso)")
-    finalize_and_print(df_paper_stars, "TABLA 2: ESTRELLAS DE PAPEL (Ineficientes Caros)")
-    finalize_and_print(df_albatross, "TABLA 3: ALBATROS (Pasivos con Impacto Negativo)")
-    finalize_and_print(df_elite, "TABLA 4: ELITE (MVP Level)")
-    finalize_and_print(df_bargains, "TABLA 5: CHOLLOS (Rentabilidad Máxima | Min > 20)")
+    finalize_and_print(df_blacklist, "Table 1: Toxic Contracts")
+    finalize_and_print(df_paper_stars, "Table 2: Fading stars")
+    finalize_and_print(df_albatross, "Table 3: Silent Killers")
+    finalize_and_print(df_elite, "Table 4: Elite")
+    finalize_and_print(df_bargains, "Table 5: Bargains")
 
     return df_final, df_blacklist, df_paper_stars, df_albatross, df_elite, df_bargains
 
